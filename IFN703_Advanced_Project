@@ -1,0 +1,99 @@
+## Opening and manipulating netcdf files
+#------------------------------------------------------------------------------------#
+#Load the library needed
+#------------------------------------------------------------------------------------#
+library(RNetCDF)
+library(ggplot2)
+library(dplyr)
+library(raster)
+library(abind)
+#------------------------------------------------------------------------------------#
+#Define the path
+#------------------------------------------------------------------------------------#
+tws_126_1 <- "~/Desktop/IFN703/data_2/mrtws_Emon_CESM2-WACCM_ssp126_r1i1p1f1_gn_201501-210012.nc"
+tws_126_2 <- "~/Desktop/IFN703/data_2/mrtws_Emon_CESM2-WACCM_ssp126_r1i1p1f1_gn_225101-229912.nc"
+tws_245_1 <- "~/Desktop/IFN703/data/mrtws_Emon_CESM2_ssp245_r11i1p1f1_gn_201501-206412.nc"
+tws_245_2 <- "~/Desktop/IFN703/data/mrtws_Emon_CESM2_ssp245_r11i1p1f1_gn_206501-210012.nc"
+tws_585_1 <- "~/Desktop/IFN703/data_2/mrtws_Emon_CESM2-WACCM_ssp585_r1i1p1f1_gn_201501-210012.nc"
+tws_585_2 <- "~/Desktop/IFN703/data_2/mrtws_Emon_CESM2-WACCM_ssp585_r1i1p1f1_gn_225101-229912.nc"
+#------------------------------------------------------------------------------------#
+#Load the data
+#------------------------------------------------------------------------------------#
+nc_126.1 <- open.nc(tws_585_1)                        #Change file
+#View metadata
+print.nc(nc_126.1)
+
+#------------------------------------------------------------------------------------#
+#To calculate TWSA-DPI, the formula is (TWSt-TWS_bar)/TWS_std
+#So I need to calculate the yearly mean of tws and std of tws, then got every month's
+#TWS minus yearly mean.
+#where 𝑇𝑊𝑆𝑡 is the TWS value of the month t of the current year, 𝑋̅ is the long-term average TWS
+#and δ is the standard deviation.
+#Interested area: India and Australia
+#------------------------------------------------------------------------------------#
+#Change the dataset here
+#------------------------------------------------------------------------------------#
+lat <- var.get.nc(nc_126.1, "lat") # Latitude
+lon <- var.get.nc(nc_126.1, "lon") # Longitude
+time <- var.get.nc(nc_126.1, "time") # Time
+mrtws <- var.get.nc(nc_126.1, "mrtws")
+
+#nt <- dim(time)
+#nt
+
+
+plot(raster(mrtws[,,1]))
+
+years <- 2015:2100
+#years_1 <- 2015:2064
+#years_2 <- 2065:2100
+#------------------------------------------------------------------------------------#
+#Loop for first year period 2015-2064
+#year_data <- mrtws[,,1:1032]
+for(i in 1:length(years)){
+  curr_data <- apply(mrtws[,,((i-1)*12+1):(i*12)], c(1,2), mean, na.rm = TRUE)
+  if(i == 1){ # If you're in the first year, start output array
+    year_data <- curr_data
+  }else{ # If you're not in the first year, add curr_data to output array along time dimension (dim 3)
+    year_data <- abind(year_data, curr_data, along=3)
+  }
+}
+
+lonlat <- expand.grid("lon" = lon, "lat" = lat)
+time_long <- rep(years, each = dim(lonlat)[1])
+tws_long <- data.frame("lon" = rep(lonlat$lon, times = length(years)), 
+                       "lat" = rep(lonlat$lat, times = length(years)), 
+                       "time" = time_long, 
+                       "ssp" = "ssp585",                     #Change SSP
+                       "tws" = as.vector(year_data))
+#Restrict the area to Australia and India
+#'IN': ('India', (68.1766451354, 7.96553477623, 97.4025614766, 35.4940095078)),
+#'AU': ('Australia', (113.338953078, -43.6345972634, 153.569469029, -10.6681857235))
+#''IL': ('Israel', (34.2654333839, 29.5013261988, 35.8363969256, 33.2774264593))
+#AU
+tws_AU <- tws_long %>% dplyr::filter(lon >= 34 & lon <= 36 & lat >= 30 & lat <= 33)  #Change longitude
+#
+write.csv(tws_AU, file = "tws_IS_585.csv", row.names = FALSE)                        #Change file name
+
+
+#------------------------------------------------------------------------------------#
+#Calculate the mean of all years
+tws_mean <- tws_AU %>% dplyr::group_by(lon, lat, ssp) %>% 
+  summarise(tws_mean = mean(mrtws, na.rm = TRUE), .groups = "drop")
+
+#In Australia, the mean of TWS for 86 years of data
+#18589.8 for 86 years of data in 126
+#18619.63 for the first 50 years in 245
+#18545.35 for the last  36 years in 245
+#18572.11 for 86 years of data in 585
+
+#Calculate the standard deviation of all years
+tws_std_AU <- tws_AU %>% dplyr::group_by(lon, lat, ssp) %>% 
+  summarise(tws_std = sd(mrtws, na.rm = TRUE), .groups = "drop")
+
+#In Australia, the standard deviation of TWS for 86 years of data
+#24445.77 for 86 years of data in 126
+#24444.62 for the first 50 years in 245
+#24429.15 for the last 36 years in 245
+#24419.09 for 86 years of data in 585
+
